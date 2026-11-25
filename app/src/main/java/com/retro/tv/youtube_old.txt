@@ -1,0 +1,111 @@
+package com.retro.tv
+
+import android.annotation.SuppressLint
+import android.os.Handler
+import android.os.Looper
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
+
+// YouTube requires embedders to identify themselves (error 153 otherwise).
+// Use your app's package name as an https origin.
+private const val APP_ORIGIN = "https://com.retro.tv"
+
+private const val PLAYER_HTML = """
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<style>html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}#p,iframe{position:fixed;top:0;left:0;width:100vw;height:100vh;border:0}</style>
+</head>
+<body>
+<div id="p"></div>
+<script>
+window.pendingId = '__VID__';
+var player, ready = false;
+window.onerror = function (m) { Android.log('JS error: ' + m); };
+Android.log('page loaded, first id=' + window.pendingId);
+function onYouTubeIframeAPIReady() {
+  player = new YT.Player('p', {
+    width: '100%', height: '100%',
+    playerVars: { controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0,
+                  iv_load_policy: 3, playsinline: 1, autoplay: 1,
+                  origin: '__ORIGIN__' },
+    events: {
+      onReady: function () { ready = true; Android.log('player ready, loading ' + window.pendingId); if (window.pendingId) player.loadVideoById(window.pendingId); },
+      onStateChange: function (e) { Android.log('state ' + e.data); if (e.data === 0) Android.onEnded(); },
+      onError: function (e) { Android.log('error ' + e.data); Android.onError(e.data); }
+    }
+  });
+}
+function play(id) { Android.log('play ' + id + ' ready=' + ready); window.pendingId = id; if (ready) player.loadVideoById(id); }
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
+"""
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun YouTubePlayer(
+    videoId: String,
+    onEnded: () -> Unit,
+    onError: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val endedCb by rememberUpdatedState(onEnded)
+    val errorCb by rememberUpdatedState(onError)
+    val main = remember { Handler(Looper.getMainLooper()) }
+    var webView by remember { mutableStateOf<WebView?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            webView?.apply {
+                stopLoading()
+                loadUrl("about:blank")
+                destroy()
+            }
+            webView = null
+        }
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            WebView(ctx).apply {
+                isFocusable = false              // remote keys stay with Compose
+                isFocusableInTouchMode = false
+                setBackgroundColor(android.graphics.Color.BLACK)
+                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.mediaPlaybackRequiresUserGesture = false
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun log(msg: String) { android.util.Log.d("RETROTV", msg) }
+
+                    @JavascriptInterface
+                    fun onEnded() { main.post { endedCb() } }
+
+                    @JavascriptInterface
+                    fun onError(code: Int) { main.post { errorCb(code) } }
+                }, "Android")
+                tag = videoId
+                loadDataWithBaseURL(
+                    APP_ORIGIN,
+                    PLAYER_HTML.replace("__VID__", videoId).replace("__ORIGIN__", APP_ORIGIN),
+                    "text/html", "utf-8", null
+                )
+                webView = this
+            }
+        },
+        update = { wv ->
+            if (wv.tag != videoId) {
+                wv.tag = videoId
+                wv.evaluateJavascript("play('$videoId')", null)
+            }
+        }
+    )
+}
