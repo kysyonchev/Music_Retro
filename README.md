@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Android%20TV-3DDC84">
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-FF355E">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.1-FF355E">
 </p>
 
 ---
